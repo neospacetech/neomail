@@ -20,9 +20,10 @@ from fastapi import APIRouter, Header, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from neomail.api import TransitionIn, apply_transition
 from neomail.contracts import ACTION_INVOKE_PATH
+from neomail.models import SendIn, SmartSendIn, Strict
 from neomail.problems import ProblemRoute, problem, problem_responses
+from neomail.service import MailService
 from neomail.settings import Settings, get_settings
 
 
@@ -40,20 +41,83 @@ class InvokeResponse(BaseModel):
     undo_token: str | None = None
 
 
-class TransitionActionInput(TransitionIn):
-    slug: str = Field(max_length=64)
+class MoveInput(Strict):
+    message_id: str = Field(max_length=64)
+    mailbox_ids: list[str] = Field(min_length=1, max_length=50)
 
 
-def _transition(payload: dict[str, Any]) -> dict[str, Any]:
-    data = TransitionActionInput.model_validate(payload)
-    return apply_transition(data.slug, data).model_dump()
+class MarkInput(Strict):
+    message_id: str = Field(max_length=64)
+    seen: bool | None = None
+    flagged: bool | None = None
 
 
-# Action id -> handler taking validated JSON input and returning JSON output.
-# A handler must not commit anything itself: the invoke endpoint decides,
-# based on dry_run, whether to persist the result and emit events.
-HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
-    "neomail.item.transition": _transition,
+ActionResult = tuple[dict[str, Any], str | None]
+
+
+def _send(service: MailService, payload: dict[str, Any], dry_run: bool) -> ActionResult:
+    data = SendIn.model_validate(payload)
+    fields = data.model_dump(exclude={"claims"})
+    fields["claims"] = [c.to_core() for c in data.claims]
+    result = service.send(data.owner, fields, dry_run=dry_run)
+    record = result.record
+    output = {
+        "message_id": None if dry_run else record.id,
+        "thread_id": record.thread_id or None,
+        "subject": record.subject,
+        "recipients": [a["email"] for a in (*record.to, *record.cc, *record.bcc)],
+        "submission_id": result.submission_id,
+        "findings": result.findings,
+    }
+    return output, None
+
+
+def _message_state(service: MailService, message_id: str, record: Any) -> dict[str, Any]:
+    return {
+        "message_id": message_id,
+        "mailbox_ids": list(record.mailbox_ids),
+        "seen": record.seen,
+        "flagged": record.flagged,
+        "version": record.version,
+    }
+
+
+def _move(service: MailService, payload: dict[str, Any], dry_run: bool) -> ActionResult:
+    data = MoveInput.model_validate(payload)
+    record = service.update_message(data.message_id, mailbox_ids=data.mailbox_ids, dry_run=dry_run)
+    return _message_state(service, data.message_id, record), None
+
+
+def _mark(service: MailService, payload: dict[str, Any], dry_run: bool) -> ActionResult:
+    data = MarkInput.model_validate(payload)
+    record = service.update_message(
+        data.message_id, seen=data.seen, flagged=data.flagged, dry_run=dry_run
+    )
+    return _message_state(service, data.message_id, record), None
+
+
+def _check(service: MailService, payload: dict[str, Any], dry_run: bool) -> ActionResult:
+    data = SmartSendIn.model_validate(payload)
+    report = service.smart_send(
+        data.owner, data.draft.model_dump(), [c.to_core() for c in data.claims], data.include_local
+    )
+    findings = report["findings"]
+    blocking = any(f["severity"] == "conflict" for f in findings)
+    return {
+        "findings": findings,
+        "claims_checked": len(report["claims"]),
+        "blocking": blocking,
+    }, None
+
+
+# Action id -> handler taking the service, validated JSON input and the dry_run
+# flag, and returning the JSON output plus an undo token. On a dry run a handler
+# validates and computes everything but sends, stores and emits nothing.
+HANDLERS: dict[str, Callable[[MailService, dict[str, Any], bool], ActionResult]] = {
+    "neomail.message.send": _send,
+    "neomail.message.move": _move,
+    "neomail.message.mark": _mark,
+    "neomail.smartsend.check": _check,
 }
 
 
@@ -89,7 +153,7 @@ def _fingerprint(body: InvokeRequest) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def create_actions_router(settings: Settings | None = None) -> APIRouter:
+def create_actions_router(service: MailService, settings: Settings | None = None) -> APIRouter:
     store = IdempotencyStore(ttl_seconds=(settings or get_settings()).idempotency_ttl_seconds)
     router = APIRouter(tags=["neosuite"], route_class=ProblemRoute)
 
@@ -97,7 +161,7 @@ def create_actions_router(settings: Settings | None = None) -> APIRouter:
         ACTION_INVOKE_PATH,
         operation_id="invokeAction",
         response_model=InvokeResponse,
-        responses=problem_responses(404, 409, 422),
+        responses=problem_responses(404, 409, 422, 502),
     )
     async def invoke_action(
         action_id: str,
@@ -127,12 +191,14 @@ def create_actions_router(settings: Settings | None = None) -> APIRouter:
                 return stored_response
 
         try:
-            output = handler(body.input)
+            output, undo_token = handler(service, body.input, body.dry_run)
         except ValidationError as exc:
             errors = [{**err, "loc": ("body", "input", *err["loc"])} for err in exc.errors()]
             raise RequestValidationError(errors) from exc
 
-        result = InvokeResponse(action_id=action_id, dry_run=body.dry_run, output=output)
+        result = InvokeResponse(
+            action_id=action_id, dry_run=body.dry_run, output=output, undo_token=undo_token
+        )
         if idempotency_key is not None and not body.dry_run:
             store.put(action_id, idempotency_key, fingerprint, result)
         return result

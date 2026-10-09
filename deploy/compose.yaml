@@ -8,11 +8,38 @@ services:
     environment:
       NEOMAIL_ENVIRONMENT: production
       NEOMAIL_LOG_LEVEL: info
+      # Outgoing mail goes to Stalwart over JMAP once an account and identity are provisioned.
+      NEOMAIL_JMAP_API_URL: http://neomail-stalwart:8080/jmap
+      NEOMAIL_JMAP_ACCOUNT_ID: ${NEOMAIL_JMAP_ACCOUNT_ID:-}
+      NEOMAIL_JMAP_IDENTITY_ID: ${NEOMAIL_JMAP_IDENTITY_ID:-}
+      NEOMAIL_JMAP_SENT_MAILBOX_ID: ${NEOMAIL_JMAP_SENT_MAILBOX_ID:-}
+      NEOMAIL_JMAP_TOKEN: ${NEOMAIL_JMAP_TOKEN:-}
     expose:
       - "8000"
+    depends_on:
+      - neomail-stalwart
     restart: unless-stopped
     read_only: true
     tmpfs:
       - /tmp
     security_opt:
       - no-new-privileges:true
+
+  # Mail server: SMTP, IMAP and JMAP. Its own store holds only server state;
+  # NeoMail objects live in NeoDB.
+  neomail-stalwart:
+    image: stalwartlabs/mail-server:v0.10.7
+    ports:
+      - "25:25"
+      - "587:587"
+      - "993:993"
+    expose:
+      - "8080"
+    volumes:
+      - neomail-stalwart-data:/opt/stalwart-mail
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  neomail-stalwart-data:

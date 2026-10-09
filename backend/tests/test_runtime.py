@@ -30,24 +30,24 @@ def test_readyz_fails_without_contracts(tmp_path: Path) -> None:
 
 
 def test_metrics_exposition(client: TestClient) -> None:
-    client.post("/api/v1/items/validate", json={"title": "Count me"})
-    client.post("/api/v1/items/validate", json={"title": ""})
+    client.post("/api/v1/mailboxes", json={"owner": "user:a", "name": "Count me"})
+    client.post("/api/v1/mailboxes", json={"owner": "user:a", "name": ""})
     response = client.get("/metrics")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain; version=0.0.4")
     body = response.text
     assert "# TYPE neomail_http_requests_total counter" in body
-    labels = 'method="POST",route="/api/v1/items/validate"'
-    assert f'neomail_http_requests_total{{{labels},status="200"}} 1' in body
+    labels = 'method="POST",route="/api/v1/mailboxes"'
+    assert f'neomail_http_requests_total{{{labels},status="201"}} 1' in body
     assert f'neomail_http_requests_total{{{labels},status="422"}} 1' in body
     assert "neomail_build_info{" in body
 
 
 def test_metrics_use_route_templates(client: TestClient) -> None:
-    client.post("/api/v1/items/some-slug/transition", json={"status": "todo"})
+    client.get("/api/v1/messages/01ARZ3NDEKTSV4RRFFQ69G5FAV")
     body = client.get("/metrics").text
-    assert 'route="/api/v1/items/{slug}/transition"' in body
-    assert "some-slug" not in body
+    assert 'route="/api/v1/messages/{message_id}"' in body
+    assert "01ARZ3NDEKTSV4RRFFQ69G5FAV" not in body
 
 
 def test_unknown_path_is_problem(client: TestClient) -> None:
@@ -58,6 +58,6 @@ def test_unknown_path_is_problem(client: TestClient) -> None:
 
 
 def test_wrong_method_is_problem(client: TestClient) -> None:
-    response = client.get("/api/v1/items/validate")
+    response = client.delete("/api/v1/mailboxes")
     assert response.status_code == 405
     assert response.json()["code"] == "method_not_allowed"

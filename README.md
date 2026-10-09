@@ -2,7 +2,29 @@
 
 Self-hosted mail for NeoSuite: a mail server and a multi-account client, aware of your calendar, tasks and contacts.
 
-Status: scaffold. The `Item` model is a placeholder domain to replace.
+## Domain
+
+- **Mailboxes** (`neomail.Mailbox`): folders per owner with JMAP / RFC 6154 roles (inbox, drafts,
+  sent, archive, junk, trash, custom). Names are hierarchical (`Projects/Acme`) and unique per
+  owner ignoring case; every role except custom is unique too.
+- **Messages** (`neomail.Message`): addresses are parsed per RFC 5322 (quoted display names,
+  plus tags, internationalised addresses), recipients are deduplicated across To, Cc and Bcc,
+  and subjects are whitespace-normalised.
+- **Threads** (`neomail.Thread`): messages group by `References` and `In-Reply-To` (including
+  replies to a message that never arrived), and reference-less replies join by base subject
+  (`Re:`, `Fwd:`, `AW:`, `[list]` tags and the like stripped). Grouping is independent of
+  arrival order.
+- **Smart Send**: before a message leaves, `POST /api/v1/smart-send/check` checks the draft's
+  claims (meeting times, stated availability, presence) against the sender's calendar, and its
+  mentions of attachments and people against what the draft contains. Findings carry a
+  severity, a one-sentence reason and the calendar objects behind them; a conflict stops
+  `POST /api/v1/messages/send` unless the sender confirms.
+
+Outgoing mail is submitted over JMAP to Stalwart (`deploy/compose.yaml`); without a configured
+server the backend keeps submissions in memory. Changes are emitted as CloudEvents
+(`neomail.message.received`, `…sent`, `…moved`, `…marked`, `neomail.mailbox.*`) and streamed at
+`GET /api/v1/changes`. NeoFlow can invoke `neomail.message.send|move|mark` and
+`neomail.smartsend.check`.
 
 ## Layout
 

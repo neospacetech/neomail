@@ -16,22 +16,36 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
-from neomail_core import ItemError
+from neomail_core import MailError
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from neomail.service import ResourceNotFoundError, SmartSendBlockedError
+from neomail.transport import TransportError
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_PREFIX = "urn:neosuite:problem:"
 
 # HTTP status for each core error code. Input that can never be valid is 422;
-# a well-formed request that conflicts with the item's current state is 409.
+# a well-formed request that conflicts with existing mailboxes is 409.
 STATUS_BY_CODE: dict[str, int] = {
-    "title_empty": 422,
-    "title_too_long": 422,
-    "status_unknown": 422,
-    "slug_invalid": 422,
-    "transition_invalid": 409,
-    "status_terminal": 409,
+    "address_empty": 422,
+    "address_invalid": 422,
+    "address_too_long": 422,
+    "recipients_empty": 422,
+    "recipients_too_many": 422,
+    "subject_too_long": 422,
+    "message_id_invalid": 422,
+    "mailbox_name_empty": 422,
+    "mailbox_name_invalid": 422,
+    "mailbox_role_unknown": 422,
+    "claim_kind_unknown": 422,
+    "fact_kind_unknown": 422,
+    "interval_invalid": 422,
+    "claim_invalid": 422,
+    "payload_invalid": 422,
+    "mailbox_role_taken": 409,
+    "mailbox_name_taken": 409,
 }
 
 CODE_BY_HTTP_STATUS: dict[int, str] = {
@@ -44,6 +58,7 @@ CODE_BY_HTTP_STATUS: dict[int, str] = {
     422: "request_invalid",
     429: "rate_limited",
     500: "internal_error",
+    502: "bad_gateway",
     503: "unavailable",
 }
 
@@ -88,9 +103,21 @@ def problem(
     return ProblemResponse(body.model_dump(exclude_none=True), status_code=status, headers=headers)
 
 
-def from_item_error(exc: ItemError, request: Request) -> ProblemResponse:
+def from_core_error(exc: MailError, request: Request) -> ProblemResponse:
     code = getattr(exc, "code", "request_invalid")
     return problem(STATUS_BY_CODE.get(code, 422), code, detail=str(exc), instance=request.url.path)
+
+
+def from_not_found(exc: ResourceNotFoundError, request: Request) -> ProblemResponse:
+    return problem(404, "not_found", detail=str(exc), instance=request.url.path)
+
+
+def from_blocked(exc: SmartSendBlockedError, request: Request) -> ProblemResponse:
+    return problem(409, exc.code, detail=str(exc), instance=request.url.path)
+
+
+def from_transport(exc: TransportError, request: Request) -> ProblemResponse:
+    return problem(502, "transport_failed", detail=str(exc), instance=request.url.path)
 
 
 def from_validation_error(exc: RequestValidationError, request: Request) -> ProblemResponse:
@@ -128,8 +155,14 @@ class ProblemRoute(APIRoute):
         async def problem_handler(request: Request) -> Response:
             try:
                 return await handler(request)
-            except ItemError as exc:
-                return from_item_error(exc, request)
+            except MailError as exc:
+                return from_core_error(exc, request)
+            except ResourceNotFoundError as exc:
+                return from_not_found(exc, request)
+            except SmartSendBlockedError as exc:
+                return from_blocked(exc, request)
+            except TransportError as exc:
+                return from_transport(exc, request)
             except RequestValidationError as exc:
                 return from_validation_error(exc, request)
             except StarletteHTTPException as exc:
@@ -149,20 +182,36 @@ def install_problem_handlers(app: FastAPI) -> None:
         assert isinstance(exc, RequestValidationError)
         return from_validation_error(exc, request)
 
-    async def on_item_error(request: Request, exc: Exception) -> Response:
-        assert isinstance(exc, ItemError)
-        return from_item_error(exc, request)
+    async def on_core_error(request: Request, exc: Exception) -> Response:
+        assert isinstance(exc, MailError)
+        return from_core_error(exc, request)
+
+    async def on_not_found(request: Request, exc: Exception) -> Response:
+        assert isinstance(exc, ResourceNotFoundError)
+        return from_not_found(exc, request)
+
+    async def on_blocked(request: Request, exc: Exception) -> Response:
+        assert isinstance(exc, SmartSendBlockedError)
+        return from_blocked(exc, request)
+
+    async def on_transport(request: Request, exc: Exception) -> Response:
+        assert isinstance(exc, TransportError)
+        return from_transport(exc, request)
 
     app.add_exception_handler(StarletteHTTPException, on_http_exception)
     app.add_exception_handler(RequestValidationError, on_validation_error)
-    app.add_exception_handler(ItemError, on_item_error)
+    app.add_exception_handler(MailError, on_core_error)
+    app.add_exception_handler(ResourceNotFoundError, on_not_found)
+    app.add_exception_handler(SmartSendBlockedError, on_blocked)
+    app.add_exception_handler(TransportError, on_transport)
 
 
 _PROBLEM_SCHEMA = Problem.model_json_schema()
 _DESCRIPTIONS = {
     404: "No such resource.",
-    409: "The request conflicts with the item's current state.",
+    409: "The request conflicts with existing mailboxes or with Smart Send findings.",
     422: "The input was rejected.",
+    502: "The mail server did not accept the message.",
 }
 
 

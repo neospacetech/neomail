@@ -1,11 +1,9 @@
 import type { ProductRoute } from "../module";
-import { ItemsScreen } from "./ItemsScreen";
-import { LifecycleScreen } from "./LifecycleScreen";
+import { MailScreen } from "./MailScreen";
 
-export { ItemsScreen, LifecycleScreen };
+export { MailScreen };
+export { Composer, type ComposerInitial, type ComposerProps } from "./Composer";
+export { ThreadView, type ThreadViewProps } from "./ThreadView";
 
 /** Screens mounted by the shell under `/neomail`. */
-export const routes: ProductRoute[] = [
-  { path: "", title: "Items", nav: true, component: ItemsScreen },
-  { path: "lifecycle", title: "Lifecycle", nav: true, component: LifecycleScreen },
-];
+export const routes: ProductRoute[] = [{ path: "", title: "Mail", nav: true, component: MailScreen }];

@@ -52,9 +52,10 @@ def test_manifest_is_built_from_contracts(client: TestClient) -> None:
         assert descriptor["description"]
         assert descriptor["input_schema"]["type"] == "object"
 
-    assert "neomail.Item" in types
-    assert "neomail.item.created" in events
-    assert "neomail.item.transition" in actions
+    assert {"neomail.Mailbox", "neomail.Thread", "neomail.Message"} <= set(types)
+    assert "neomail.message.received" in events
+    assert actions["neomail.message.send"]["effect"] == "external"
+    assert actions["neomail.smartsend.check"]["effect"] == "read"
 
 
 def test_manifest_settings_schema(client: TestClient) -> None:

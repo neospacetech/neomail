@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:neosuite:neomail:event:neomail.message.received",
+  "title": "Message received",
+  "description": "CloudEvents 1.0 `data` for the neomail.message.received event. An incoming message was filed and threaded. Thin payload: consumers fetch the object through the Object Service with their own principal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ref",
+    "changed",
+    "version",
+    "thread"
+  ],
+  "properties": {
+    "ref": {
+      "description": "Object URI of the message.",
+      "type": "string",
+      "pattern": "^neo://[^/]+/o/[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "changed": {
+      "description": "Names of the fields set by this change.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "mailbox_ids",
+          "thread_id"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "version": {
+      "description": "Object version after the change.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "thread": {
+      "description": "Non-sensitive scalar: reference of the message's thread.",
+      "type": "string",
+      "pattern": "^neo://[^/]+/o/[0-9A-HJKMNP-TV-Z]{26}$"
+    }
+  },
+  "x-neosuite": {
+    "event": "neomail.message.received",
+    "object_type": "neomail.Message",
+    "envelope": {
+      "specversion": "1.0",
+      "type": "neomail.message.received",
+      "source": "neo://{tenant}/neomail",
+      "subject": "{object ulid}",
+      "datacontenttype": "application/json"
+    }
+  }
+}

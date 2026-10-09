@@ -1,14 +1,14 @@
 import type { WidgetDescriptor } from "../module";
-import { ItemStatusBadge, type ItemStatusBadgeProps } from "./ItemStatusBadge";
+import { InboxWidget, type InboxWidgetProps } from "./InboxWidget";
 
-export { ItemStatusBadge, type ItemStatusBadgeProps };
+export { InboxWidget, type InboxWidgetProps };
 
 /** Embeddable views other products and NeoMind can render, keyed by stable widget id. */
 export const widgets = {
-  "neomail.item.status": {
-    id: "neomail.item.status",
-    title: "Item status",
-    objectType: "neomail.Item",
-    component: ItemStatusBadge,
-  } satisfies WidgetDescriptor<ItemStatusBadgeProps>,
+  "neomail.inbox": {
+    id: "neomail.inbox",
+    title: "Inbox",
+    objectType: "neomail.Thread",
+    component: InboxWidget,
+  } satisfies WidgetDescriptor<InboxWidgetProps>,
 };

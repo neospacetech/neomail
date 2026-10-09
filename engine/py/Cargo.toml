@@ -20,3 +20,5 @@ doctest = false
 [dependencies]
 neomail-core.workspace = true
 pyo3 = { workspace = true, features = ["extension-module"] }
+serde.workspace = true
+serde_json.workspace = true

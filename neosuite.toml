@@ -9,11 +9,23 @@ images = ["backend"]
 packages = ["frontend"]
 
 [contracts]
-provides_types = ["neomail.Item"]
-consumes_types = []
-emits = ["neomail.item.created"]
-actions = ["neomail.item.transition"]
-depends_on = []
+provides_types = ["neomail.Mailbox", "neomail.Thread", "neomail.Message"]
+consumes_types = ["core.Event", "core.Person"]
+emits = [
+    "neomail.mailbox.created",
+    "neomail.mailbox.updated",
+    "neomail.message.received",
+    "neomail.message.sent",
+    "neomail.message.moved",
+    "neomail.message.marked",
+]
+actions = [
+    "neomail.message.send",
+    "neomail.message.move",
+    "neomail.message.mark",
+    "neomail.smartsend.check",
+]
+depends_on = ["neodb>=0.1", "neostore>=0.1", "neomind>=0.1", "neoflow>=0.1", "neocalendar>=0.1"]
 
 [runtime.backend]
 ports = [{ name = "http", container = 8000, expose = "internal" }]

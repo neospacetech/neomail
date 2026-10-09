@@ -1,9 +1,9 @@
 """Product API, mounted under ``/api/v1``.
 
-Endpoints only translate between HTTP and the Rust core: every decision about
-titles, slugs and statuses is made by ``neomail_core``. Core errors propagate
-as :class:`neomail_core.ItemError` and :class:`~neomail.problems.ProblemRoute`
-renders them as problem documents.
+Endpoints only translate between HTTP and :class:`~neomail.service.MailService`;
+every mail rule lives in ``neomail_core``. Core errors propagate as
+:class:`neomail_core.MailError` and :class:`~neomail.problems.ProblemRoute`
+renders them, like missing resources, as problem documents.
 """
 
 import asyncio
@@ -14,156 +14,272 @@ from typing import Annotated, Any
 import neomail_core as core
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
 
+from neomail.models import (
+    PRINCIPAL_PATTERN,
+    AddressList,
+    AddressParseIn,
+    DefaultsIn,
+    MailboxIn,
+    MailboxOut,
+    MailboxPatch,
+    MessageIn,
+    MessageOut,
+    MessagePatch,
+    SendIn,
+    SendOut,
+    SmartSendIn,
+    SmartSendOut,
+    ThreadOut,
+    ThreadSummary,
+)
 from neomail.problems import ProblemRoute, problem_responses
+from neomail.repository import MailboxRecord, MessageRecord
+from neomail.service import MailService
 from neomail.settings import Settings, get_settings
 
 API_PREFIX = "/api/v1"
+# Changes sent per outbox read on the change stream.
+CHANGE_BATCH = 100
 
-# Upper bound on raw input size, so oversized payloads are rejected before they
-# reach the core. The core enforces the real limit on the normalised title.
-RAW_TITLE_MAX = 10_000
-
-
-class ItemDraft(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    title: str = Field(max_length=RAW_TITLE_MAX, description="Raw title as typed by the user.")
+OwnerQuery = Annotated[str | None, Query(pattern=PRINCIPAL_PATTERN)]
 
 
-def following_status(status: str) -> str | None:
-    """The status after ``status``, or None when the core says it is final."""
-    try:
-        return core.next_status(status)
-    except core.ItemError:
-        return None
-
-
-class ItemOut(BaseModel):
-    title: str = Field(description="Normalised title.")
-    slug: str = Field(description="URL-safe identifier derived from the title.")
-    status: str = Field(description="Lifecycle status: todo, doing or done.")
-    next_status: str | None = Field(
-        description="Status the item can move to next; null when the status is final."
-    )
-
-    @classmethod
-    def from_core(cls, item: core.Item) -> "ItemOut":
-        return cls(
-            title=item.title,
-            slug=item.slug,
-            status=item.status,
-            next_status=following_status(item.status),
-        )
-
-
-class TransitionIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    status: str = Field(max_length=32, description="The item's current status.")
-    target: str | None = Field(
-        default=None, max_length=32, description="Requested status; omit to advance one step."
-    )
-
-
-class TransitionOut(BaseModel):
-    slug: str
-    previous_status: str
-    status: str
-    next_status: str | None = Field(
-        description="Status the item can move to next; null when the status is final."
-    )
-
-
-def apply_transition(slug: str, body: TransitionIn) -> TransitionOut:
-    """Validate and apply a status change. Shared by the API and the action."""
-    core.validate_slug(slug)
-    if body.target is None:
-        new_status = core.next_status(body.status)
-    else:
-        new_status = core.transition(body.status, body.target)
-    return TransitionOut(
-        slug=slug,
-        previous_status=body.status,
-        status=new_status,
-        next_status=following_status(new_status),
-    )
-
-
-def sse_event(event: str, data: dict[str, Any], event_id: int) -> str:
+def sse_event(event: str, data: dict[str, Any], event_id: int | None = None) -> str:
     """Encode one Server-Sent Event."""
     payload = json.dumps(data, separators=(",", ":"))
-    return f"id: {event_id}\nevent: {event}\ndata: {payload}\n\n"
+    head = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{head}event: {event}\ndata: {payload}\n\n"
 
 
-def create_api_router() -> APIRouter:
-    router = APIRouter(
-        prefix=API_PREFIX,
-        tags=["items"],
-        route_class=ProblemRoute,
+def smart_send_out(report: dict[str, Any]) -> SmartSendOut:
+    findings = report["findings"]
+    return SmartSendOut.model_validate(
+        {
+            "findings": findings,
+            "claims_checked": len(report["claims"]),
+            "blocking": any(f["severity"] == "conflict" for f in findings),
+        }
     )
 
-    @router.post("/items/validate", operation_id="validateItem", responses=problem_responses(422))
-    async def validate_item(draft: ItemDraft) -> ItemOut:
-        """Normalise a draft title and return the item it would create."""
-        return ItemOut.from_core(core.Item(draft.title))
 
-    @router.post(
-        "/items/{slug}/transition",
-        operation_id="transitionItem",
-        responses=problem_responses(409, 422),
-    )
-    async def transition_item(slug: str, body: TransitionIn) -> TransitionOut:
-        """Move an item to its next status, or to ``target`` if that step is allowed."""
-        return apply_transition(slug, body)
+def create_api_router(service: MailService) -> APIRouter:
+    router = APIRouter(prefix=API_PREFIX, route_class=ProblemRoute)
+
+    def mailbox_out(record: MailboxRecord, counts: dict[str, tuple[int, int]]) -> MailboxOut:
+        return MailboxOut.of(record, service.ref(record.id), counts.get(record.id, (0, 0)))
+
+    def message_out(record: MessageRecord) -> MessageOut:
+        return MessageOut.of(record, service.ref(record.id))
+
+    # -- mailboxes ---------------------------------------------------------------------------
 
     @router.get(
-        "/items/lifecycle",
-        operation_id="streamItemLifecycle",
+        "/mailboxes",
+        tags=["mailboxes"],
+        operation_id="listMailboxes",
+        responses=problem_responses(422),
+    )
+    async def list_mailboxes(owner: OwnerQuery = None) -> list[MailboxOut]:
+        """Mailboxes with message counts, in display order (inbox first, custom last)."""
+        counts = service.mailbox_counts()
+        return [mailbox_out(m, counts) for m in service.list_mailboxes(owner)]
+
+    @router.post(
+        "/mailboxes",
+        tags=["mailboxes"],
+        operation_id="createMailbox",
+        status_code=201,
+        responses=problem_responses(409, 422),
+    )
+    async def create_mailbox(body: MailboxIn) -> MailboxOut:
+        """Create a mailbox. Names are unique per owner, and so is every role except custom."""
+        record = service.create_mailbox(body.owner, body.name, body.role)
+        return mailbox_out(record, {})
+
+    @router.post(
+        "/mailboxes/defaults",
+        tags=["mailboxes"],
+        operation_id="createDefaultMailboxes",
+        responses=problem_responses(409, 422),
+    )
+    async def create_default_mailboxes(body: DefaultsIn) -> list[MailboxOut]:
+        """Make sure the owner has Inbox, Drafts, Sent, Archive, Junk and Trash."""
+        records = service.ensure_defaults(body.owner)
+        counts = service.mailbox_counts()
+        return [mailbox_out(m, counts) for m in records]
+
+    @router.patch(
+        "/mailboxes/{mailbox_id}",
+        tags=["mailboxes"],
+        operation_id="renameMailbox",
+        responses=problem_responses(404, 409, 422),
+    )
+    async def rename_mailbox(mailbox_id: str, body: MailboxPatch) -> MailboxOut:
+        record = service.rename_mailbox(mailbox_id, body.name)
+        return mailbox_out(record, service.mailbox_counts())
+
+    # -- threads -----------------------------------------------------------------------------
+
+    @router.get(
+        "/threads",
+        tags=["threads"],
+        operation_id="listThreads",
+        responses=problem_responses(404, 422),
+    )
+    async def list_threads(
+        owner: OwnerQuery = None,
+        mailbox_id: Annotated[str | None, Query(max_length=64)] = None,
+    ) -> list[ThreadSummary]:
+        """Conversations, newest activity first, optionally only those in one mailbox."""
+        return [ThreadSummary.model_validate(t) for t in service.list_threads(owner, mailbox_id)]
+
+    @router.get(
+        "/threads/{thread_id}",
+        tags=["threads"],
+        operation_id="getThread",
+        responses=problem_responses(404, 422),
+    )
+    async def get_thread(thread_id: str) -> ThreadOut:
+        """A conversation with its messages, oldest first."""
+        summary, messages = service.get_thread(thread_id)
+        return ThreadOut.model_validate(
+            {**summary, "messages": [message_out(m).model_dump(by_alias=True) for m in messages]}
+        )
+
+    # -- messages ----------------------------------------------------------------------------
+
+    @router.post(
+        "/messages",
+        tags=["messages"],
+        operation_id="deliverMessage",
+        status_code=201,
+        responses=problem_responses(404, 422),
+    )
+    async def deliver_message(body: MessageIn) -> MessageOut:
+        """File an incoming message and thread it by References, In-Reply-To and subject."""
+        return message_out(service.deliver(body.owner, body.model_dump()))
+
+    @router.get(
+        "/messages/{message_id}",
+        tags=["messages"],
+        operation_id="getMessage",
+        responses=problem_responses(404, 422),
+    )
+    async def get_message(message_id: str) -> MessageOut:
+        return message_out(service.get_message(message_id))
+
+    @router.patch(
+        "/messages/{message_id}",
+        tags=["messages"],
+        operation_id="updateMessage",
+        responses=problem_responses(404, 422),
+    )
+    async def update_message(message_id: str, body: MessagePatch) -> MessageOut:
+        """Mark as seen or flagged, or move to other mailboxes."""
+        record = service.update_message(message_id, body.seen, body.flagged, body.mailbox_ids)
+        return message_out(record)
+
+    @router.post(
+        "/messages/send",
+        tags=["messages"],
+        operation_id="sendMessage",
+        responses=problem_responses(404, 409, 422, 502),
+    )
+    def send_message(body: SendIn) -> SendOut:
+        """Send a message through the mail server and file it in Sent.
+
+        Smart Send runs first. A conflict (for example, proposing a time the sender
+        is busy) stops the send with `smart_send_blocked` unless `send_anyway` is set.
+        """
+        data = body.model_dump(exclude={"claims"})
+        data["claims"] = [c.to_core() for c in body.claims]
+        result = service.send(body.owner, data)
+        return SendOut.model_validate(
+            {
+                "message": message_out(result.record).model_dump(by_alias=True),
+                "submission_id": result.submission_id,
+                "findings": result.findings,
+            }
+        )
+
+    @router.post(
+        "/addresses/parse",
+        tags=["messages"],
+        operation_id="parseAddresses",
+        responses=problem_responses(422),
+    )
+    async def parse_addresses(body: AddressParseIn) -> AddressList:
+        """Parse a header-style address list, as typed into To or Cc."""
+        return AddressList.model_validate({"addresses": core.parse_address_list(body.value)})
+
+    # -- Smart Send --------------------------------------------------------------------------
+
+    @router.post(
+        "/smart-send/check",
+        tags=["smart-send"],
+        operation_id="checkSmartSend",
+        responses=problem_responses(422),
+    )
+    async def check_smart_send(body: SmartSendIn) -> SmartSendOut:
+        """Check a draft before sending: its claims against the sender's calendar, and
+        its mentions of attachments and people against what the draft contains.
+
+        Read-only and deterministic. Claims extracted upstream (meeting times,
+        availability, presence) come in `claims`; attachment and recipient mentions
+        are found in the text unless `include_local` is false.
+        """
+        report = service.smart_send(
+            body.owner,
+            body.draft.model_dump(),
+            [c.to_core() for c in body.claims],
+            body.include_local,
+        )
+        return smart_send_out(report)
+
+    # -- change stream -----------------------------------------------------------------------
+
+    @router.get(
+        "/changes",
+        tags=["changes"],
+        operation_id="streamChanges",
         response_class=StreamingResponse,
         responses={
             **problem_responses(422),
             200: {
-                "description": "Server-Sent Events: item.created, item.status (per step), end.",
+                "description": "Server-Sent Events: one `change` per domain event, then `end`.",
                 "content": {"text/event-stream": {"schema": {"type": "string"}}},
             },
         },
     )
-    async def stream_lifecycle(
+    async def stream_changes(
         request: Request,
         settings: Annotated[Settings, Depends(get_settings)],
-        title: Annotated[str, Query(max_length=RAW_TITLE_MAX)],
+        after: Annotated[int, Query(ge=0, description="Last change sequence already seen.")] = 0,
+        follow: Annotated[bool, Query(description="Keep the stream open for new changes.")] = True,
     ) -> StreamingResponse:
-        """Stream an item moving through its whole lifecycle as Server-Sent Events.
+        """Domain events (CloudEvents 1.0, thin payloads) as Server-Sent Events.
 
-        The title is validated before the stream opens, so a bad title is a normal
-        problem response rather than an error event mid-stream.
+        Each ``change`` event carries the envelope and its sequence number as the SSE
+        id, so a client resumes with ``after=<last id>``. Without ``follow`` the
+        stream ends with an ``end`` event once it has caught up.
         """
-        item = core.Item(title)
 
         async def events() -> AsyncIterator[str]:
-            event_id = 1
-            yield sse_event("item.created", ItemOut.from_core(item).model_dump(), event_id)
+            seq = after
             while True:
-                await asyncio.sleep(settings.stream_interval_seconds)
+                batch = service.outbox.since(seq, CHANGE_BATCH)
+                for change in batch:
+                    seq = change.seq
+                    yield sse_event("change", change.envelope, change.seq)
+                if len(batch) == CHANGE_BATCH:
+                    continue
+                if not follow:
+                    yield sse_event("end", {"seq": seq})
+                    return
+                await asyncio.sleep(max(settings.stream_interval_seconds, 0.01))
                 if await request.is_disconnected():
                     return
-                previous = item.status
-                try:
-                    item.advance()
-                except core.ItemError:
-                    # The core decides when the lifecycle is over (status_terminal).
-                    break
-                event_id += 1
-                step = TransitionOut(
-                    slug=item.slug,
-                    previous_status=previous,
-                    status=item.status,
-                    next_status=following_status(item.status),
-                )
-                yield sse_event("item.status", step.model_dump(), event_id)
-            yield sse_event("end", {"slug": item.slug}, event_id + 1)
 
         return StreamingResponse(
             events(),

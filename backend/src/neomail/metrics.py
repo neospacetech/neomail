@@ -71,7 +71,7 @@ class Metrics:
 class MetricsMiddleware:
     """ASGI middleware recording one observation per HTTP request.
 
-    Routes are labelled by their path template (``/api/v1/items/{slug}/transition``),
+    Routes are labelled by their path template (``/api/v1/messages/{message_id}``),
     never the concrete path, to keep label cardinality bounded.
     """
 

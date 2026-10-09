@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from neomail import COMPONENT, TITLE, __version__
 from neomail.actions import create_actions_router
 from neomail.api import create_api_router
+from neomail.calendar_facts import InMemoryCalendarFacts
 from neomail.contracts import (
     MANIFEST_PATH,
     ContractsNotFoundError,
@@ -24,23 +25,43 @@ from neomail.contracts import (
     load_contracts,
 )
 from neomail.metrics import PROMETHEUS_MEDIA_TYPE, Metrics, MetricsMiddleware
+from neomail.outbox import InMemoryOutbox
 from neomail.problems import install_problem_handlers, problem
+from neomail.repository import InMemoryRepository
+from neomail.service import MailService
 from neomail.settings import Settings, get_settings
+from neomail.transport import create_transport
 
 logger = logging.getLogger(COMPONENT)
 
 
-def create_router(settings: Settings | None = None) -> APIRouter:
+def create_service(settings: Settings | None = None) -> MailService:
+    """The mail service over in-process storage and outbox, with the configured transport."""
+    settings = settings or get_settings()
+    return MailService(
+        InMemoryRepository(),
+        InMemoryOutbox(),
+        settings.tenant,
+        transport=create_transport(settings),
+        calendar=InMemoryCalendarFacts(),
+    )
+
+
+def create_router(
+    settings: Settings | None = None, service: MailService | None = None
+) -> APIRouter:
     """The product's routes, ready to be included in any FastAPI app."""
+    service = service or create_service(settings)
     router = APIRouter()
-    router.include_router(create_api_router())
-    router.include_router(create_actions_router(settings))
+    router.include_router(create_api_router(service))
+    router.include_router(create_actions_router(service, settings))
     return router
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, service: MailService | None = None) -> FastAPI:
     """The standalone service."""
     settings = settings or get_settings()
+    service = service or create_service(settings)
     logging.basicConfig(level=settings.log_level.upper())
 
     app = FastAPI(title=TITLE, version=__version__, docs_url="/docs", redoc_url=None)
@@ -59,7 +80,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         manifest_error = str(exc)
         logger.error("contracts unavailable: %s", exc)
 
-    app.include_router(create_router(settings))
+    app.state.service = service
+    app.include_router(create_router(settings, service))
 
     @app.get("/healthz", tags=["runtime"], operation_id="healthz")
     async def healthz() -> dict[str, str]:

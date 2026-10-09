@@ -1,8 +1,12 @@
 [package]
 name = "neomail-core"
-description = "Pure domain logic for NeoMail: item model, validation and status rules."
+description = "Pure domain logic for NeoMail: addresses, threading, mailboxes and Smart Send checks."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

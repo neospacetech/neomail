@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:neosuite:neomail:event:neomail.mailbox.created",
+  "title": "Mailbox created",
+  "description": "CloudEvents 1.0 `data` for the neomail.mailbox.created event. A mailbox was created. Thin payload: consumers fetch the object through the Object Service with their own principal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ref",
+    "changed",
+    "version",
+    "role"
+  ],
+  "properties": {
+    "ref": {
+      "description": "Object URI of the mailbox.",
+      "type": "string",
+      "pattern": "^neo://[^/]+/o/[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "changed": {
+      "description": "Names of the fields set by this change.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "owner",
+          "name",
+          "role"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "version": {
+      "description": "Object version after the change.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "role": {
+      "description": "Non-sensitive scalar: the mailbox role.",
+      "enum": [
+        "inbox",
+        "drafts",
+        "sent",
+        "archive",
+        "junk",
+        "trash",
+        "custom"
+      ]
+    }
+  },
+  "x-neosuite": {
+    "event": "neomail.mailbox.created",
+    "object_type": "neomail.Mailbox",
+    "envelope": {
+      "specversion": "1.0",
+      "type": "neomail.mailbox.created",
+      "source": "neo://{tenant}/neomail",
+      "subject": "{object ulid}",
+      "datacontenttype": "application/json"
+    }
+  }
+}

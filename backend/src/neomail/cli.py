@@ -1,8 +1,8 @@
 """``neomail`` command: lifecycle hooks called by the installer.
 
-NeoMail keeps no state of its own, so migrations, backup and restore have
-nothing to do. They exist so the installer can treat every component the same
-way; a product that stores data fills these in.
+Mail data lives in NeoDB behind the storage adapter, which owns its schema,
+backup and restore; this process keeps nothing on disk. The commands exist so
+the installer can treat every component the same way.
 """
 
 import argparse
