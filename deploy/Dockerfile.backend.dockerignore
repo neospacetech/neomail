@@ -1,0 +1,13 @@
+# Build context is the repository root; send only what the image needs.
+*
+!engine/Cargo.toml
+!engine/Cargo.lock
+!engine/core/
+!engine/py/
+!backend/pyproject.toml
+!backend/README.md
+!backend/src/
+!contracts/
+**/target/
+**/__pycache__/
+**/*.pyc

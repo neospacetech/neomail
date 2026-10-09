@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neomail"
+version = "0.1.0"
+description = "NeoMail API service (FastAPI) over the neomail_core Rust engine."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-only"
+dependencies = [
+    "neomail-core>=0.1,<0.2",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.10,<3",
+    "pydantic-settings>=2.7,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "httpx>=0.28",
+    "ruff>=0.11",
+    "mypy>=1.15",
+    "pyyaml>=6.0",
+    "types-PyYAML>=6.0",
+]
+
+[project.scripts]
+neomail = "neomail.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neomail"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = [
+    # Starlette's TestClient recommends httpx2; httpx is still fully supported.
+    "ignore:Using `httpx` with `starlette.testclient`",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "ASYNC", "PT", "N"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["neomail", "tests"]
+plugins = ["pydantic.mypy"]

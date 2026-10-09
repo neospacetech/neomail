@@ -1,0 +1,18 @@
+# Compose fragment merged by neosuite-dist. Paths are relative to this file.
+services:
+  neomail-backend:
+    image: ghcr.io/neospacetech/neomail-backend:${NEOMAIL_VERSION:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    environment:
+      NEOMAIL_ENVIRONMENT: production
+      NEOMAIL_LOG_LEVEL: info
+    expose:
+      - "8000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true

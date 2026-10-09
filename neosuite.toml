@@ -2,9 +2,29 @@
 name = "neomail"
 kind = "product"
 title = "NeoMail"
+profiles = ["full"]
+
+[build]
+images = ["backend"]
+packages = ["frontend"]
 
 [contracts]
-provides_types = []
+provides_types = ["neomail.Item"]
 consumes_types = []
-emits = []
+emits = ["neomail.item.created"]
+actions = ["neomail.item.transition"]
 depends_on = []
+
+[runtime.backend]
+ports = [{ name = "http", container = 8000, expose = "internal" }]
+ingress = { host = "mail", path = "/" }
+env_required = []
+secrets = []
+volumes = []
+health = { live = "/healthz", ready = "/readyz", metrics = "/metrics" }
+resources = { min_memory = "128Mi", min_cpu = "0.1" }
+
+[lifecycle]
+migrate = { command = ["neomail", "migrate", "apply"], reversible = false }
+backup = { command = ["neomail", "backup", "/backup"], restore = ["neomail", "restore", "/backup"], consistency = "online" }
+upgrade = { supports_from = "N-2-minors", downgrade = false }

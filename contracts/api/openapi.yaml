@@ -1,0 +1,325 @@
+openapi: 3.1.0
+info:
+  title: NeoMail
+  version: 0.1.0
+  description: |
+    NeoMail service API. Domain rules (title normalisation, slugs, the
+    todo -> doing -> done lifecycle) are implemented by the Rust core; every
+    error is an RFC 9457 problem document with a stable `code`.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+tags:
+  - name: items
+    description: Product API.
+  - name: neosuite
+    description: NeoFlow action invocation.
+  - name: runtime
+    description: Health, metrics and the runtime manifest.
+paths:
+  /api/v1/items/validate:
+    post:
+      tags: [items]
+      operationId: validateItem
+      summary: Validate a draft item
+      description: Normalise a draft title and return the item it would create.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ItemDraft" }
+      responses:
+        "200":
+          description: The normalised item.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemOut" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+  /api/v1/items/{slug}/transition:
+    post:
+      tags: [items]
+      operationId: transitionItem
+      summary: Move an item to another status
+      description: Advance one step, or move to `target` if that step is allowed.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TransitionIn" }
+      responses:
+        "200":
+          description: The new status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransitionOut" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+  /api/v1/items/lifecycle:
+    get:
+      tags: [items]
+      operationId: streamItemLifecycle
+      summary: Stream an item's lifecycle
+      description: |
+        Server-Sent Events. Emits `item.created` (data: ItemOut), one
+        `item.status` per step (data: TransitionOut) and a final `end`.
+        The title is validated before the stream opens.
+      parameters:
+        - name: title
+          in: query
+          required: true
+          schema: { type: string, maxLength: 10000 }
+      responses:
+        "200":
+          description: Event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+  /neosuite/actions/v1/{action_id}:invoke:
+    post:
+      tags: [neosuite]
+      operationId: invokeAction
+      summary: Invoke a NeoFlow action
+      description: |
+        Honours `Idempotency-Key` (results kept for at least 24 hours; reusing
+        a key with a different body is rejected) and `dry_run`.
+      parameters:
+        - name: action_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: idempotency-key
+          in: header
+          required: false
+          schema: { type: string, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvokeRequest" }
+      responses:
+        "200":
+          description: Action result.
+          headers:
+            Idempotent-Replayed:
+              description: Present with value `true` when the result is a replay.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvokeResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+  /healthz:
+    get:
+      tags: [runtime]
+      operationId: healthz
+      summary: Liveness
+      responses:
+        "200":
+          description: The process is serving requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { const: ok }
+  /readyz:
+    get:
+      tags: [runtime]
+      operationId: readyz
+      summary: Readiness
+      responses:
+        "200":
+          description: Ready to take traffic.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { const: ready }
+        "503":
+          description: Not ready.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+  /metrics:
+    get:
+      tags: [runtime]
+      operationId: metrics
+      summary: Prometheus metrics
+      responses:
+        "200":
+          description: Prometheus text exposition format 0.0.4.
+          content:
+            text/plain:
+              schema: { type: string }
+  /.well-known/neosuite/manifest.json:
+    get:
+      tags: [runtime]
+      operationId: getManifest
+      summary: Runtime manifest
+      description: Types, events, actions, context providers and settings schema.
+      responses:
+        "200":
+          description: The manifest.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Manifest" }
+        "503":
+          description: Contracts could not be loaded.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+components:
+  responses:
+    NotFound:
+      description: No such resource. Codes - `not_found`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Conflict:
+      description: |
+        The request conflicts with the item's current state.
+        Codes - `transition_invalid`, `status_terminal`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unprocessable:
+      description: |
+        The input was rejected. Codes - `request_invalid`, `title_empty`,
+        `title_too_long`, `status_unknown`, `slug_invalid`, `idempotency_key_reused`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details with a stable `code` extension member.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, description: "`urn:neosuite:problem:<code>`" }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              loc: { type: array, items: { type: [string, integer] } }
+              msg: { type: string }
+              type: { type: string }
+    ItemDraft:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title: { type: string, maxLength: 10000, description: Raw title as typed by the user. }
+    ItemOut:
+      type: object
+      required: [title, slug, status, next_status]
+      properties:
+        title: { type: string, description: Normalised title. }
+        slug: { type: string }
+        status: { type: string, enum: [todo, doing, done] }
+        next_status:
+          type: [string, "null"]
+          enum: [todo, doing, done, null]
+          description: Status the item can move to next; null when the status is final.
+    TransitionIn:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, maxLength: 32, description: The item's current status. }
+        target:
+          type: [string, "null"]
+          maxLength: 32
+          description: Requested status; omit to advance one step.
+    TransitionOut:
+      type: object
+      required: [slug, previous_status, status, next_status]
+      properties:
+        slug: { type: string }
+        previous_status: { type: string, enum: [todo, doing, done] }
+        status: { type: string, enum: [todo, doing, done] }
+        next_status:
+          type: [string, "null"]
+          enum: [todo, doing, done, null]
+          description: Status the item can move to next; null when the status is final.
+    InvokeRequest:
+      type: object
+      additionalProperties: false
+      required: [input]
+      properties:
+        input: { type: object, description: "Action input; see the action's input_schema." }
+        dry_run: { type: boolean, default: false }
+    InvokeResponse:
+      type: object
+      required: [action_id, dry_run, output]
+      properties:
+        action_id: { type: string }
+        dry_run: { type: boolean }
+        output: { type: object }
+        undo_token: { type: [string, "null"] }
+    Manifest:
+      type: object
+      required: [manifest_version, service, types, events, actions, context_providers]
+      properties:
+        manifest_version: { type: integer, const: 1 }
+        service:
+          type: object
+          required: [id, name, version]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            version: { type: string }
+            api_base: { type: string }
+        types:
+          type: array
+          items:
+            type: object
+            required: [name, title, schema]
+            properties:
+              name: { type: string }
+              title: { type: string }
+              description: { type: string }
+              schema: { type: object }
+        events:
+          type: array
+          items:
+            type: object
+            required: [type, data_schema]
+            properties:
+              type: { type: string }
+              description: { type: string }
+              data_schema: { type: object }
+        actions:
+          type: array
+          items:
+            type: object
+            required: [id, title, description, effect, input_schema]
+            properties:
+              id: { type: string }
+              title: { type: string }
+              description: { type: string }
+              effect: { type: string, enum: [read, write, destructive, external] }
+              input_schema: { type: object }
+              output_schema: { type: object }
+              applies_to: { type: array, items: { type: string } }
+              required_permission: { type: string }
+              idempotent: { type: boolean }
+        context_providers: { type: array, items: { type: object } }
+        settings_schema:
+          type: object
+          description: JSON Schema of the service's NEOMAIL_* settings.

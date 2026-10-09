@@ -1,0 +1,43 @@
+{
+  "id": "neomail.item.transition",
+  "title": "Move an item to its next status",
+  "description": "Advance an item one step through todo -> doing -> done, or to an explicit target status if that step is allowed.",
+  "applies_to": ["neomail.Item"],
+  "effect": "write",
+  "required_permission": "update",
+  "dry_run": true,
+  "idempotent": true,
+  "undo": null,
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["slug", "status"],
+    "properties": {
+      "slug": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 },
+      "status": { "description": "Current status.", "type": "string", "enum": ["todo", "doing", "done"] },
+      "target": {
+        "description": "Requested status. Omit to advance one step.",
+        "type": ["string", "null"],
+        "enum": ["todo", "doing", "done", null]
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["slug", "previous_status", "status", "next_status"],
+    "properties": {
+      "slug": { "type": "string" },
+      "previous_status": { "type": "string", "enum": ["todo", "doing", "done"] },
+      "status": { "type": "string", "enum": ["todo", "doing", "done"] },
+      "next_status": {
+        "description": "Status the item can move to next; null when the status is final.",
+        "type": ["string", "null"],
+        "enum": ["todo", "doing", "done", null]
+      }
+    }
+  },
+  "errors": ["slug_invalid", "status_unknown", "status_terminal", "transition_invalid"]
+}
