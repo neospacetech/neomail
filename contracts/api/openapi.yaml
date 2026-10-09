@@ -1,0 +1,1343 @@
+openapi: 3.1.0
+info:
+  title: NeoMail
+  version: 0.1.0
+  description: |
+    NeoMail service API: mailboxes, conversations threaded by References,
+    In-Reply-To and subject, sending through the mail server (JMAP), and Smart
+    Send, which checks a draft's claims against the sender's calendar and the
+    draft itself before it leaves. Address parsing, threading and Smart Send
+    rules are implemented by the Rust core and are deterministic. Every error is
+    an RFC 9457 problem document with a stable `code`.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+tags:
+- name: mailboxes
+  description: Folders with JMAP / RFC 6154 roles.
+- name: threads
+  description: Conversations.
+- name: messages
+  description: Delivery, sending, flags and moves.
+- name: smart-send
+  description: Pre-send consistency checks.
+- name: changes
+  description: Domain events as a Server-Sent Event stream.
+- name: neosuite
+  description: NeoFlow action invocation.
+- name: runtime
+  description: Health, metrics and the runtime manifest.
+paths:
+  /api/v1/mailboxes:
+    get:
+      tags:
+      - mailboxes
+      operationId: listMailboxes
+      summary: List Mailboxes
+      description: Mailboxes with message counts, in display order (inbox first, custom last).
+      parameters:
+      - name: owner
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            pattern: ^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$
+          - type: 'null'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MailboxOut'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+    post:
+      tags:
+      - mailboxes
+      operationId: createMailbox
+      summary: Create Mailbox
+      description: Create a mailbox. Names are unique per owner, and so is every role except custom.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailboxIn'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxOut'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/mailboxes/defaults:
+    post:
+      tags:
+      - mailboxes
+      operationId: createDefaultMailboxes
+      summary: Create Default Mailboxes
+      description: Make sure the owner has Inbox, Drafts, Sent, Archive, Junk and Trash.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DefaultsIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/MailboxOut'
+                type: array
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/mailboxes/{mailbox_id}:
+    patch:
+      tags:
+      - mailboxes
+      operationId: renameMailbox
+      summary: Rename Mailbox
+      parameters:
+      - name: mailbox_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailboxPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxOut'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/threads:
+    get:
+      tags:
+      - threads
+      operationId: listThreads
+      summary: List Threads
+      description: Conversations, newest activity first, optionally only those in one mailbox.
+      parameters:
+      - name: owner
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            pattern: ^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$
+          - type: 'null'
+      - name: mailbox_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ThreadSummary'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/threads/{thread_id}:
+    get:
+      tags:
+      - threads
+      operationId: getThread
+      summary: Get Thread
+      description: A conversation with its messages, oldest first.
+      parameters:
+      - name: thread_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreadOut'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/messages:
+    post:
+      tags:
+      - messages
+      operationId: deliverMessage
+      summary: Deliver Message
+      description: File an incoming message and thread it by References, In-Reply-To and subject.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageIn'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageOut'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/messages/{message_id}:
+    get:
+      tags:
+      - messages
+      operationId: getMessage
+      summary: Get Message
+      parameters:
+      - name: message_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageOut'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+    patch:
+      tags:
+      - messages
+      operationId: updateMessage
+      summary: Update Message
+      description: Mark as seen or flagged, or move to other mailboxes.
+      parameters:
+      - name: message_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessagePatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageOut'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/messages/send:
+    post:
+      tags:
+      - messages
+      operationId: sendMessage
+      summary: Send Message
+      description: |-
+        Send a message through the mail server and file it in Sent.
+
+        Smart Send runs first. A conflict (for example, proposing a time the sender
+        is busy) stops the send with `smart_send_blocked` unless `send_anyway` is set.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendOut'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+  /api/v1/addresses/parse:
+    post:
+      tags:
+      - messages
+      operationId: parseAddresses
+      summary: Parse Addresses
+      description: Parse a header-style address list, as typed into To or Cc.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddressParseIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddressList'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/smart-send/check:
+    post:
+      tags:
+      - smart-send
+      operationId: checkSmartSend
+      summary: Check Smart Send
+      description: |-
+        Check a draft before sending: its claims against the sender's calendar, and
+        its mentions of attachments and people against what the draft contains.
+
+        Read-only and deterministic. Claims extracted upstream (meeting times,
+        availability, presence) come in `claims`; attachment and recipient mentions
+        are found in the text unless `include_local` is false.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmartSendIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmartSendOut'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/changes:
+    get:
+      tags:
+      - changes
+      operationId: streamChanges
+      summary: Stream Changes
+      description: |-
+        Domain events (CloudEvents 1.0, thin payloads) as Server-Sent Events.
+
+        Each ``change`` event carries the envelope and its sequence number as the SSE
+        id, so a client resumes with ``after=<last id>``. Without ``follow`` the
+        stream ends with an ``end`` event once it has caught up.
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          description: Last change sequence already seen.
+          default: 0
+        description: Last change sequence already seen.
+      - name: follow
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Keep the stream open for new changes.
+          default: true
+        description: Keep the stream open for new changes.
+      responses:
+        '200':
+          description: 'Server-Sent Events: one `change` per domain event, then `end`.'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /neosuite/actions/v1/{action_id}:invoke:
+    post:
+      tags:
+      - neosuite
+      operationId: invokeAction
+      summary: Invoke a NeoFlow action
+      description: |
+        Honours `Idempotency-Key` (results kept for at least 24 hours; reusing
+        a key with a different body is rejected) and `dry_run`.
+      parameters:
+      - name: action_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: idempotency-key
+        in: header
+        required: false
+        schema:
+          type: string
+          maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvokeRequest'
+      responses:
+        '200':
+          description: Action result.
+          headers:
+            Idempotent-Replayed:
+              description: Present with value `true` when the result is a replay.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvokeResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+  /healthz:
+    get:
+      tags:
+      - runtime
+      operationId: healthz
+      summary: Liveness
+      responses:
+        '200':
+          description: The process is serving requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - status
+                properties:
+                  status:
+                    const: ok
+  /readyz:
+    get:
+      tags:
+      - runtime
+      operationId: readyz
+      summary: Readiness
+      responses:
+        '200':
+          description: Ready to take traffic.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - status
+                properties:
+                  status:
+                    const: ready
+        '503':
+          description: Not ready.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /metrics:
+    get:
+      tags:
+      - runtime
+      operationId: metrics
+      summary: Prometheus metrics
+      responses:
+        '200':
+          description: Prometheus text exposition format 0.0.4.
+          content:
+            text/plain:
+              schema:
+                type: string
+  /.well-known/neosuite/manifest.json:
+    get:
+      tags:
+      - runtime
+      operationId: getManifest
+      summary: Runtime manifest
+      description: Types, events, actions, context providers and settings schema.
+      responses:
+        '200':
+          description: The manifest.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Manifest'
+        '503':
+          description: Contracts could not be loaded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+components:
+  responses:
+    NotFound:
+      description: No such mailbox, thread, message or action. Codes - `not_found`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: |
+        The request conflicts with existing mailboxes, or Smart Send found a conflict.
+        Codes - `mailbox_name_taken`, `mailbox_role_taken`, `smart_send_blocked`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unprocessable:
+      description: |
+        The input was rejected. Codes - `request_invalid`, `address_empty`, `address_invalid`,
+        `address_too_long`, `recipients_empty`, `recipients_too_many`, `subject_too_long`,
+        `message_id_invalid`, `mailbox_name_empty`, `mailbox_name_invalid`, `mailbox_role_unknown`,
+        `claim_kind_unknown`, `fact_kind_unknown`, `interval_invalid`, `claim_invalid`,
+        `payload_invalid`, `idempotency_key_reused`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    BadGateway:
+      description: The mail server did not accept the message. Codes - `transport_failed`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details with a stable `code` extension member.
+      required:
+      - type
+      - title
+      - status
+      - code
+      properties:
+        type:
+          type: string
+          description: '`urn:neosuite:problem:<code>`'
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        detail:
+          type: string
+        instance:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              loc:
+                type: array
+                items:
+                  type:
+                  - string
+                  - integer
+              msg:
+                type: string
+              type:
+                type: string
+    Address:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Display name, unquoted.
+        email:
+          type: string
+          description: local@domain as written on the wire.
+        canonical:
+          type: string
+          description: Case-folded local@domain, for comparing people.
+        display:
+          type: string
+          description: 'RFC 5322 form: Name <local@domain>.'
+      type: object
+      required:
+      - name
+      - email
+      - canonical
+      - display
+    AddressList:
+      properties:
+        addresses:
+          items:
+            $ref: '#/components/schemas/Address'
+          type: array
+      type: object
+      required:
+      - addresses
+    AddressParseIn:
+      properties:
+        value:
+          type: string
+          maxLength: 20000
+          description: A header-style list.
+      additionalProperties: false
+      type: object
+      required:
+      - value
+    DefaultsIn:
+      properties:
+        owner:
+          type: string
+          pattern: ^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$
+      additionalProperties: false
+      type: object
+      required:
+      - owner
+    DraftIn:
+      properties:
+        to:
+          items:
+            type: string
+          type: array
+          maxItems: 500
+        cc:
+          items:
+            type: string
+          type: array
+          maxItems: 500
+        bcc:
+          items:
+            type: string
+          type: array
+          maxItems: 500
+        text:
+          type: string
+          maxLength: 1000000
+          default: ''
+        attachments:
+          items:
+            type: string
+          type: array
+          maxItems: 100
+      additionalProperties: false
+      type: object
+    InvokeRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - input
+      properties:
+        input:
+          type: object
+          description: Action input; see the action's input_schema.
+        dry_run:
+          type: boolean
+          default: false
+    InvokeResponse:
+      type: object
+      required:
+      - action_id
+      - dry_run
+      - output
+      properties:
+        action_id:
+          type: string
+        dry_run:
+          type: boolean
+        output:
+          type: object
+        undo_token:
+          type:
+          - string
+          - 'null'
+    MailboxIn:
+      properties:
+        owner:
+          type: string
+          pattern: ^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$
+        name:
+          type: string
+          maxLength: 2000
+          description: Hierarchical, '/'-separated.
+        role:
+          type: string
+          enum:
+          - inbox
+          - drafts
+          - sent
+          - archive
+          - junk
+          - trash
+          - custom
+          default: custom
+      additionalProperties: false
+      type: object
+      required:
+      - owner
+      - name
+    MailboxOut:
+      properties:
+        id:
+          type: string
+        ref:
+          type: string
+        owner:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum:
+          - inbox
+          - drafts
+          - sent
+          - archive
+          - junk
+          - trash
+          - custom
+        total:
+          type: integer
+        unread:
+          type: integer
+        version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      type: object
+      required:
+      - id
+      - ref
+      - owner
+      - name
+      - role
+      - total
+      - unread
+      - version
+      - created_at
+      - updated_at
+    MailboxPatch:
+      properties:
+        name:
+          type: string
+          maxLength: 2000
+      additionalProperties: false
+      type: object
+      required:
+      - name
+    Manifest:
+      type: object
+      required:
+      - manifest_version
+      - service
+      - types
+      - events
+      - actions
+      - context_providers
+      properties:
+        manifest_version:
+          type: integer
+          const: 1
+        service:
+          type: object
+          required:
+          - id
+          - name
+          - version
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            version:
+              type: string
+            api_base:
+              type: string
+        types:
+          type: array
+          items:
+            type: object
+            required:
+            - name
+            - title
+            - schema
+            properties:
+              name:
+                type: string
+              title:
+                type: string
+              description:
+                type: string
+              schema:
+                type: object
+        events:
+          type: array
+          items:
+            type: object
+            required:
+            - type
+            - data_schema
+            properties:
+              type:
+                type: string
+              description:
+                type: string
+              data_schema:
+                type: object
+        actions:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - title
+            - description
+            - effect
+            - input_schema
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              description:
+                type: string
+              effect:
+                type: string
+                enum:
+                - read
+                - write
+                - destructive
+                - external
+              input_schema:
+                type: object
+              output_schema:
+                type: object
+              applies_to:
+                type: array
+                items:
+                  type: string
+              required_permission:
+                type: string
+              idempotent:
+                type: boolean
+        context_providers:
+          type: array
+          items:
+            type: object
+        settings_schema:
+          type: object
+          description: JSON Schema of the service's NEOMAIL_* settings.
+    MessageIn:
+      properties:
+        to:
+          items:
+            type: string
+          type: array
+          maxItems: 500
+        cc:
+          items:
+            type: string
+          type: array
+          maxItems: 500
+        bcc:
+          items:
+            type: string
+          type: array
+          maxItems: 500
+        owner:
+          type: string
+          pattern: ^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$
+        sender:
+          type: string
+          maxLength: 2000
+          description: The From header.
+        subject:
+          type: string
+          maxLength: 4000
+          default: ''
+        text:
+          type: string
+          maxLength: 1000000
+          default: ''
+        mailbox_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Defaults to the owner's inbox.
+        message_id:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+        in_reply_to:
+          anyOf:
+          - type: string
+            maxLength: 20000
+          - type: 'null'
+        references:
+          anyOf:
+          - type: string
+            maxLength: 20000
+          - type: 'null'
+        attachments:
+          items:
+            type: string
+          type: array
+          maxItems: 100
+        received_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - owner
+      - sender
+      description: An incoming message to file (as delivered by the mail server).
+    MessageOut:
+      properties:
+        id:
+          type: string
+        ref:
+          type: string
+        owner:
+          type: string
+        thread_id:
+          type: string
+        mailbox_ids:
+          items:
+            type: string
+          type: array
+        message_id:
+          type: string
+          description: Message-ID header, without angle brackets.
+        in_reply_to:
+          items:
+            type: string
+          type: array
+        references:
+          items:
+            type: string
+          type: array
+        from:
+          $ref: '#/components/schemas/Address'
+        to:
+          items:
+            $ref: '#/components/schemas/Address'
+          type: array
+        cc:
+          items:
+            $ref: '#/components/schemas/Address'
+          type: array
+        bcc:
+          items:
+            $ref: '#/components/schemas/Address'
+          type: array
+        subject:
+          type: string
+        text:
+          type: string
+        attachments:
+          items:
+            type: string
+          type: array
+        received_at:
+          type: string
+          format: date-time
+        seen:
+          type: boolean
+        flagged:
+          type: boolean
+        version:
+          type: integer
+      type: object
+      required:
+      - id
+      - ref
+      - owner
+      - thread_id
+      - mailbox_ids
+      - message_id
+      - in_reply_to
+      - references
+      - from
+      - to
+      - cc
+      - bcc
+      - subject
+      - text
+      - attachments
+      - received_at
+      - seen
+      - flagged
+      - version
+    MessagePatch:
+      properties:
+        seen:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+        flagged:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+        mailbox_ids:
+          anyOf:
+          - items:
+              type: string
+            type: array
+            maxItems: 50
+            minItems: 1
+          - type: 'null'
+      additionalProperties: false
+      type: object
+    SendIn:
+      properties:
+        to:
+          items:
+            type: string
+          type: array
+          maxItems: 500
+        cc:
+          items:
+            type: string
+          type: array
+          maxItems: 500
+        bcc:
+          items:
+            type: string
+          type: array
+          maxItems: 500
+        owner:
+          type: string
+          pattern: ^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$
+        sender:
+          type: string
+          maxLength: 2000
+          description: The From header.
+        subject:
+          type: string
+          maxLength: 4000
+          default: ''
+        text:
+          type: string
+          maxLength: 1000000
+          default: ''
+        attachments:
+          items:
+            type: string
+          type: array
+          maxItems: 100
+        reply_to_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Stored message this replies to.
+        claims:
+          items:
+            $ref: '#/components/schemas/SmartSendClaim'
+          type: array
+          maxItems: 1000
+          description: Claims extracted upstream.
+        send_anyway:
+          type: boolean
+          description: Send even when Smart Send finds a conflict.
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - owner
+      - sender
+    SendOut:
+      properties:
+        message:
+          $ref: '#/components/schemas/MessageOut'
+        submission_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Transport's id for the submission.
+        findings:
+          items:
+            $ref: '#/components/schemas/SmartSendFinding'
+          type: array
+      type: object
+      required:
+      - message
+      - submission_id
+      - findings
+    SmartSendClaim:
+      properties:
+        id:
+          type: string
+          maxLength: 64
+        kind:
+          type: string
+          enum:
+          - presence
+          - meeting_time
+          - availability
+          - attachment_ref
+          - recipient_ref
+        start:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+        end:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+        place:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+        name:
+          anyOf:
+          - type: string
+            maxLength: 200
+          - type: 'null'
+        span:
+          anyOf:
+          - items:
+              type: integer
+            type: array
+            maxItems: 2
+            minItems: 2
+          - type: 'null'
+          description: '[start, end) character offsets.'
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - kind
+    SmartSendFinding:
+      properties:
+        claim:
+          type: string
+        rule:
+          type: string
+          enum:
+          - overlap
+          - out_of_office
+          - focus_time
+          - elsewhere_then
+          - missing_attachment
+          - missing_recipient
+        severity:
+          type: string
+          enum:
+          - info
+          - warn
+          - conflict
+        why:
+          type: string
+        evidence:
+          items:
+            type: string
+          type: array
+          description: Calendar object refs backing the finding.
+        span:
+          anyOf:
+          - items:
+              type: integer
+            type: array
+          - type: 'null'
+      type: object
+      required:
+      - claim
+      - rule
+      - severity
+      - why
+      - evidence
+      - span
+    SmartSendIn:
+      properties:
+        owner:
+          type: string
+          pattern: ^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$
+          description: The sender, whose calendar is used.
+        draft:
+          $ref: '#/components/schemas/DraftIn'
+        claims:
+          items:
+            $ref: '#/components/schemas/SmartSendClaim'
+          type: array
+          maxItems: 1000
+        include_local:
+          type: boolean
+          description: Also find attachment and recipient mentions in the text.
+          default: true
+      additionalProperties: false
+      type: object
+      required:
+      - owner
+      - draft
+    SmartSendOut:
+      properties:
+        findings:
+          items:
+            $ref: '#/components/schemas/SmartSendFinding'
+          type: array
+        claims_checked:
+          type: integer
+        blocking:
+          type: boolean
+          description: True when a conflict should stop Send for confirmation.
+      type: object
+      required:
+      - findings
+      - claims_checked
+      - blocking
+    ThreadOut:
+      properties:
+        id:
+          type: string
+        ref:
+          type: string
+        owner:
+          type: string
+        subject:
+          type: string
+          description: 'Base subject, without Re:/Fwd: prefixes.'
+        message_ids:
+          items:
+            type: string
+          type: array
+        message_count:
+          type: integer
+        unread_count:
+          type: integer
+        flagged:
+          type: boolean
+        participants:
+          items:
+            type: string
+          type: array
+          description: Senders, earliest first.
+        mailbox_ids:
+          items:
+            type: string
+          type: array
+        snippet:
+          type: string
+        last_at:
+          type: string
+          format: date-time
+        messages:
+          items:
+            $ref: '#/components/schemas/MessageOut'
+          type: array
+      type: object
+      required:
+      - id
+      - ref
+      - owner
+      - subject
+      - message_ids
+      - message_count
+      - unread_count
+      - flagged
+      - participants
+      - mailbox_ids
+      - snippet
+      - last_at
+      - messages
+    ThreadSummary:
+      properties:
+        id:
+          type: string
+        ref:
+          type: string
+        owner:
+          type: string
+        subject:
+          type: string
+          description: 'Base subject, without Re:/Fwd: prefixes.'
+        message_ids:
+          items:
+            type: string
+          type: array
+        message_count:
+          type: integer
+        unread_count:
+          type: integer
+        flagged:
+          type: boolean
+        participants:
+          items:
+            type: string
+          type: array
+          description: Senders, earliest first.
+        mailbox_ids:
+          items:
+            type: string
+          type: array
+        snippet:
+          type: string
+        last_at:
+          type: string
+          format: date-time
+      type: object
+      required:
+      - id
+      - ref
+      - owner
+      - subject
+      - message_ids
+      - message_count
+      - unread_count
+      - flagged
+      - participants
+      - mailbox_ids
+      - snippet
+      - last_at

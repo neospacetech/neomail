@@ -1,0 +1,219 @@
+{
+  "id": "neomail.smartsend.check",
+  "title": "Check a draft with Smart Send",
+  "description": "Check a draft's claims against the sender's calendar, and its mentions of attachments and people against the draft. Read-only and deterministic.",
+  "applies_to": [
+    "neomail.Message"
+  ],
+  "effect": "read",
+  "required_permission": "read",
+  "dry_run": true,
+  "idempotent": true,
+  "undo": null,
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "owner",
+      "draft"
+    ],
+    "properties": {
+      "owner": {
+        "type": "string",
+        "pattern": "^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$"
+      },
+      "draft": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "default": []
+          },
+          "cc": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "default": []
+          },
+          "bcc": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "default": []
+          },
+          "text": {
+            "type": "string"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "claims": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "kind": {
+              "enum": [
+                "presence",
+                "meeting_time",
+                "availability",
+                "attachment_ref",
+                "recipient_ref"
+              ]
+            },
+            "start": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "end": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "place": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 500
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 200
+            },
+            "span": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        "default": []
+      },
+      "include_local": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": [
+      "findings",
+      "claims_checked",
+      "blocking"
+    ],
+    "properties": {
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "claim",
+            "rule",
+            "severity",
+            "why",
+            "evidence",
+            "span"
+          ],
+          "properties": {
+            "claim": {
+              "type": "string"
+            },
+            "rule": {
+              "enum": [
+                "overlap",
+                "out_of_office",
+                "focus_time",
+                "elsewhere_then",
+                "missing_attachment",
+                "missing_recipient"
+              ]
+            },
+            "severity": {
+              "enum": [
+                "info",
+                "warn",
+                "conflict"
+              ]
+            },
+            "why": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "span": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      },
+      "claims_checked": {
+        "type": "integer"
+      },
+      "blocking": {
+        "type": "boolean"
+      }
+    }
+  },
+  "errors": [
+    "request_invalid",
+    "claim_invalid",
+    "claim_kind_unknown",
+    "interval_invalid"
+  ]
+}

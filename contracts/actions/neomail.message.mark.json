@@ -1,0 +1,75 @@
+{
+  "id": "neomail.message.mark",
+  "title": "Mark a message",
+  "description": "Mark a message seen or unseen, flagged or unflagged.",
+  "applies_to": [
+    "neomail.Message"
+  ],
+  "effect": "write",
+  "required_permission": "update",
+  "dry_run": true,
+  "idempotent": true,
+  "undo": null,
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "message_id"
+    ],
+    "properties": {
+      "message_id": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "seen": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "flagged": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "message_id",
+      "mailbox_ids",
+      "seen",
+      "flagged",
+      "version"
+    ],
+    "properties": {
+      "message_id": {
+        "type": "string"
+      },
+      "mailbox_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "seen": {
+        "type": "boolean"
+      },
+      "flagged": {
+        "type": "boolean"
+      },
+      "version": {
+        "type": "integer"
+      }
+    }
+  },
+  "errors": [
+    "request_invalid",
+    "not_found"
+  ]
+}

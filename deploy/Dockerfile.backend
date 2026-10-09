@@ -1,0 +1,52 @@
+# syntax=docker/dockerfile:1
+# NeoMail backend image. Build from the repository root:
+#   docker build -f deploy/Dockerfile.backend -t neomail-backend .
+
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+ARG RUST_VERSION=1.85.0
+
+# --- builder: compile the Rust core into a wheel and package the backend ----
+FROM ${PYTHON_IMAGE} AS builder
+ARG RUST_VERSION
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+       | sh -s -- -y --profile minimal --default-toolchain "${RUST_VERSION}" \
+    && pip install --no-cache-dir "maturin>=1.9,<2"
+
+WORKDIR /src
+COPY engine/ engine/
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/engine/target \
+    maturin build --release --locked -m engine/py/Cargo.toml -o /dist
+
+COPY backend/ backend/
+RUN pip wheel --no-cache-dir --no-deps ./backend -w /dist
+
+# --- runtime ------------------------------------------------------------------
+FROM ${PYTHON_IMAGE} AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    NEOMAIL_ENVIRONMENT=production \
+    NEOMAIL_CONTRACTS_DIR=/app/contracts
+
+RUN groupadd --system --gid 10001 neomail \
+    && useradd --system --uid 10001 --gid neomail --home-dir /app --shell /usr/sbin/nologin neomail
+
+RUN --mount=type=bind,from=builder,source=/dist,target=/tmp/dist \
+    pip install --no-cache-dir /tmp/dist/*.whl
+
+WORKDIR /app
+COPY contracts/ /app/contracts/
+
+USER neomail:neomail
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)"]
+CMD ["uvicorn", "neomail.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--no-server-header"]

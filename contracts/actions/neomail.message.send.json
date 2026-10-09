@@ -1,0 +1,263 @@
+{
+  "id": "neomail.message.send",
+  "title": "Send a message",
+  "description": "Send an email through the mail server and file it in Sent. Smart Send runs first; a conflict stops the send (smart_send_blocked) unless send_anyway is set. A dry run validates the envelope and returns the Smart Send findings without sending.",
+  "applies_to": [
+    "neomail.Message"
+  ],
+  "effect": "external",
+  "required_permission": "send",
+  "dry_run": true,
+  "idempotent": false,
+  "undo": null,
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "owner",
+      "sender"
+    ],
+    "properties": {
+      "owner": {
+        "type": "string",
+        "pattern": "^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$"
+      },
+      "sender": {
+        "type": "string",
+        "maxLength": 2000
+      },
+      "to": {
+        "type": "array",
+        "maxItems": 500,
+        "items": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "default": []
+      },
+      "cc": {
+        "type": "array",
+        "maxItems": 500,
+        "items": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "default": []
+      },
+      "bcc": {
+        "type": "array",
+        "maxItems": 500,
+        "items": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "default": []
+      },
+      "subject": {
+        "type": "string",
+        "maxLength": 4000,
+        "default": ""
+      },
+      "text": {
+        "type": "string",
+        "default": ""
+      },
+      "attachments": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": []
+      },
+      "reply_to_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "claims": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "kind": {
+              "enum": [
+                "presence",
+                "meeting_time",
+                "availability",
+                "attachment_ref",
+                "recipient_ref"
+              ]
+            },
+            "start": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "end": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "place": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 500
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 200
+            },
+            "span": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        "default": []
+      },
+      "send_anyway": {
+        "type": "boolean",
+        "default": false
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "message_id",
+      "thread_id",
+      "subject",
+      "recipients",
+      "submission_id",
+      "findings"
+    ],
+    "properties": {
+      "message_id": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Null on a dry run."
+      },
+      "thread_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "subject": {
+        "type": "string"
+      },
+      "recipients": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "submission_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "claim",
+            "rule",
+            "severity",
+            "why",
+            "evidence",
+            "span"
+          ],
+          "properties": {
+            "claim": {
+              "type": "string"
+            },
+            "rule": {
+              "enum": [
+                "overlap",
+                "out_of_office",
+                "focus_time",
+                "elsewhere_then",
+                "missing_attachment",
+                "missing_recipient"
+              ]
+            },
+            "severity": {
+              "enum": [
+                "info",
+                "warn",
+                "conflict"
+              ]
+            },
+            "why": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "span": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "errors": [
+    "request_invalid",
+    "not_found",
+    "address_empty",
+    "address_invalid",
+    "address_too_long",
+    "recipients_empty",
+    "recipients_too_many",
+    "subject_too_long",
+    "claim_invalid",
+    "smart_send_blocked",
+    "transport_failed"
+  ]
+}

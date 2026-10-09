@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:neosuite:neomail:type:neomail.Thread",
+  "title": "Thread",
+  "description": "A conversation: messages grouped by References and In-Reply-To, and reference-less replies grouped by base subject.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "owner",
+    "subject",
+    "messages",
+    "last_at"
+  ],
+  "properties": {
+    "owner": {
+      "type": "string",
+      "pattern": "^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$"
+    },
+    "subject": {
+      "type": "string",
+      "description": "Base subject of the earliest message, without Re:/Fwd: prefixes and list tags."
+    },
+    "messages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^neo://[^/]+/o/[0-9A-HJKMNP-TV-Z]{26}$"
+      },
+      "description": "Oldest first."
+    },
+    "last_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "x-neosuite": {
+    "type": "neomail.Thread",
+    "searchable": [
+      "subject"
+    ],
+    "facets": [
+      "owner"
+    ]
+  }
+}

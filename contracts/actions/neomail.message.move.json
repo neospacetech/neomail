@@ -1,0 +1,72 @@
+{
+  "id": "neomail.message.move",
+  "title": "Move a message",
+  "description": "Put a message in the given mailboxes (for example archive it, or file it in a folder). The mailboxes must belong to the message's owner.",
+  "applies_to": [
+    "neomail.Message"
+  ],
+  "effect": "write",
+  "required_permission": "update",
+  "dry_run": true,
+  "idempotent": true,
+  "undo": null,
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "message_id",
+      "mailbox_ids"
+    ],
+    "properties": {
+      "message_id": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "mailbox_ids": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 50,
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "message_id",
+      "mailbox_ids",
+      "seen",
+      "flagged",
+      "version"
+    ],
+    "properties": {
+      "message_id": {
+        "type": "string"
+      },
+      "mailbox_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "seen": {
+        "type": "boolean"
+      },
+      "flagged": {
+        "type": "boolean"
+      },
+      "version": {
+        "type": "integer"
+      }
+    }
+  },
+  "errors": [
+    "request_invalid",
+    "not_found"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:neosuite:neomail:type:neomail.Mailbox",
+  "title": "Mailbox",
+  "description": "A folder of messages owned by a principal. Roles follow JMAP / RFC 6154 special-use; every role except custom is unique per owner, and names are unique per owner ignoring case.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "owner",
+    "name",
+    "role"
+  ],
+  "properties": {
+    "owner": {
+      "type": "string",
+      "pattern": "^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "Hierarchical, '/'-separated, whitespace-normalised; the inbox is written INBOX."
+    },
+    "role": {
+      "enum": [
+        "inbox",
+        "drafts",
+        "sent",
+        "archive",
+        "junk",
+        "trash",
+        "custom"
+      ]
+    }
+  },
+  "x-neosuite": {
+    "type": "neomail.Mailbox",
+    "searchable": [
+      "name"
+    ],
+    "facets": [
+      "owner",
+      "role"
+    ]
+  }
+}

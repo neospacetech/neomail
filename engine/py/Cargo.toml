@@ -1,0 +1,24 @@
+[package]
+name = "neomail-py"
+description = "Python bindings for neomail-core, built by maturin into the neomail_core wheel."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "neomail_py"
+crate-type = ["cdylib"]
+# The extension module links against the host interpreter at import time,
+# so it has no standalone test binary. Logic is tested in `neomail-core`
+# and the bindings are exercised by the backend test suite.
+test = false
+doctest = false
+
+[dependencies]
+neomail-core.workspace = true
+pyo3 = { workspace = true, features = ["extension-module"] }
+serde.workspace = true
+serde_json.workspace = true

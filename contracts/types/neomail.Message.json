@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:neosuite:neomail:type:neomail.Message",
+  "title": "Message",
+  "description": "One email: parsed envelope, threading headers, flags and mailbox membership. The full MIME source lives in NeoStore.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "owner",
+    "thread",
+    "mailboxes",
+    "message_id",
+    "from",
+    "to",
+    "cc",
+    "bcc",
+    "subject",
+    "received_at",
+    "seen",
+    "flagged"
+  ],
+  "properties": {
+    "owner": {
+      "type": "string",
+      "pattern": "^(user|group|org|svc|agent):[A-Za-z0-9._-]{1,64}$"
+    },
+    "thread": {
+      "type": "string",
+      "pattern": "^neo://[^/]+/o/[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "The neomail.Thread the message belongs to."
+    },
+    "mailboxes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^neo://[^/]+/o/[0-9A-HJKMNP-TV-Z]{26}$"
+      }
+    },
+    "message_id": {
+      "type": "string",
+      "description": "Message-ID header without angle brackets."
+    },
+    "in_reply_to": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "from": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "email"
+      ],
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Display name, unquoted."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 254,
+          "description": "local@domain; the domain is lower case."
+        }
+      }
+    },
+    "to": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "email"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name, unquoted."
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "description": "local@domain; the domain is lower case."
+          }
+        }
+      }
+    },
+    "cc": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "email"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name, unquoted."
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "description": "local@domain; the domain is lower case."
+          }
+        }
+      }
+    },
+    "bcc": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "email"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name, unquoted."
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "description": "local@domain; the domain is lower case."
+          }
+        }
+      }
+    },
+    "subject": {
+      "type": "string",
+      "maxLength": 998,
+      "description": "Whitespace-collapsed subject."
+    },
+    "preview": {
+      "type": "string",
+      "maxLength": 65536,
+      "description": "Sanitised text preview."
+    },
+    "attachments": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Attachment file names (bytes in NeoStore)."
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "seen": {
+      "type": "boolean"
+    },
+    "flagged": {
+      "type": "boolean"
+    }
+  },
+  "x-neosuite": {
+    "type": "neomail.Message",
+    "searchable": [
+      "subject",
+      "preview",
+      "from",
+      "to",
+      "cc"
+    ],
+    "facets": [
+      "owner",
+      "seen",
+      "flagged",
+      "mailboxes"
+    ]
+  }
+}
