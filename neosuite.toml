@@ -1,0 +1,10 @@
+[component]
+name = "neomail"
+kind = "product"
+title = "NeoMail"
+
+[contracts]
+provides_types = []
+consumes_types = []
+emits = []
+depends_on = []
